@@ -1,0 +1,20 @@
+[package]
+name = "egui-video-player"
+version = "0.1.0"
+edition = "2021"
+description = "Cross-platform video player using FFmpeg and egui"
+license = "MIT"
+
+[dependencies]
+eframe = "0.29"
+egui = "0.29"
+ffmpeg-next = "8"
+rodio = "0.19"
+crossbeam-channel = "0.5"
+parking_lot = "0.12"
+rfd = "0.15"
+anyhow = "1.0"
+
+[profile.release]
+lto = true
+strip = true
