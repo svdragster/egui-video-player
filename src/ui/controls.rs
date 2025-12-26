@@ -1,5 +1,6 @@
-use crate::player::{DisplayMode, PlayerState, VideoPlayer};
+use crate::player::{DisplayMode, PlayerState, VideoPlayer, Volume};
 use egui::{Slider, Ui};
+use std::time::Duration;
 
 pub struct PlayerControls;
 
@@ -28,19 +29,19 @@ impl PlayerControls {
             ui.separator();
 
             // Timeline / seek bar
-            let duration = player.duration();
-            let player_position = player.position();
+            let duration_secs = player.duration().as_secs_f64();
+            let player_position_secs = player.position().as_secs_f64();
 
-            ui.label(format_time(player_position));
+            ui.label(format_time(player.position()));
 
             // Use memory to persist slider position during drag
             let slider_id = ui.id().with("seek_slider");
             let mut position = ui.memory(|mem| {
-                mem.data.get_temp::<f64>(slider_id).unwrap_or(player_position)
+                mem.data.get_temp::<f64>(slider_id).unwrap_or(player_position_secs)
             });
 
             let slider_response = ui.add(
-                Slider::new(&mut position, 0.0..=duration)
+                Slider::new(&mut position, 0.0..=duration_secs)
                     .show_value(false)
                     .trailing_fill(true),
             );
@@ -51,25 +52,27 @@ impl PlayerControls {
                 ui.memory_mut(|mem| mem.data.insert_temp(slider_id, position));
             } else if !player.is_seeking() {
                 // When not dragging and not seeking, sync with player
-                ui.memory_mut(|mem| mem.data.insert_temp(slider_id, player_position));
+                ui.memory_mut(|mem| mem.data.insert_temp(slider_id, player_position_secs));
             }
 
             if slider_response.drag_stopped() || slider_response.clicked() {
-                player.seek(position);
+                player.seek(Duration::from_secs_f64(position));
             }
 
-            ui.label(format_time(duration));
+            ui.label(format_time(player.duration()));
 
             ui.separator();
 
             // Volume control
             ui.label("🔊");
-            let mut volume = player.volume();
+            let mut volume = player.volume().get();
             if ui
                 .add(Slider::new(&mut volume, 0.0..=1.0).show_value(false))
                 .changed()
             {
-                player.set_volume(volume);
+                if let Some(v) = Volume::new(volume) {
+                    player.set_volume(v);
+                }
             }
 
             ui.separator();
@@ -91,8 +94,8 @@ impl PlayerControls {
     }
 }
 
-fn format_time(seconds: f64) -> String {
-    let total_seconds = seconds as u64;
+fn format_time(duration: Duration) -> String {
+    let total_seconds = duration.as_secs();
     let hours = total_seconds / 3600;
     let minutes = (total_seconds % 3600) / 60;
     let secs = total_seconds % 60;

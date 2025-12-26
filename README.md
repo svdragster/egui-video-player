@@ -12,20 +12,27 @@ Video player library for egui using FFmpeg.
 ## Usage
 
 ```rust
-use egui_video::{VideoPlayer, PlayerControls};
+use egui_video::{VideoPlayer, Volume};
+use std::time::Duration;
 
-// Open a video
-let player = VideoPlayer::open(&path, ctx.clone())?;
+// Create player
+let mut player = VideoPlayer::open(&path, ctx.clone())?;
 
-// In your update loop
+// Control playback
+player.play();
+player.pause();
+player.seek(Duration::from_secs(30));
+player.set_volume(Volume::new(0.5).unwrap());
+
+// Query state
+let pos: Duration = player.position();
+let dur: Duration = player.duration();
+let playing: bool = player.is_playing();
+
+// In your egui update loop
 player.update(ctx);
-
-// Show controls
-PlayerControls::show(ui, &mut player);
-
-// Render the video texture
-if let Some(texture) = player.texture() {
-    ui.image((texture.id(), size));
+if let Some(tex) = player.texture() {
+    ui.image((tex.id(), size));
 }
 ```
 

@@ -18,6 +18,7 @@ impl<T> CircularBuffer<T> {
     }
 
     /// Push a single item. Drops oldest if at capacity.
+    #[allow(dead_code)]
     pub fn push(&self, item: T) {
         let mut buf = self.inner.lock();
         if buf.len() >= self.capacity {
@@ -27,16 +28,26 @@ impl<T> CircularBuffer<T> {
     }
 
     /// Push multiple items. Drops oldest as needed.
+    /// Uses batch operations for O(1) amortized complexity.
     pub fn push_slice(&self, items: &[T])
     where
         T: Clone,
     {
         let mut buf = self.inner.lock();
-        for item in items {
-            if buf.len() >= self.capacity {
-                buf.pop_front();
+        let items_len = items.len();
+
+        if items_len >= self.capacity {
+            // New data exceeds capacity - just keep last `capacity` items
+            buf.clear();
+            buf.extend(items[items_len - self.capacity..].iter().cloned());
+        } else {
+            // Make room by draining oldest items if needed
+            let available = self.capacity - buf.len();
+            if items_len > available {
+                let to_remove = items_len - available;
+                buf.drain(..to_remove);
             }
-            buf.push_back(item.clone());
+            buf.extend(items.iter().cloned());
         }
     }
 
@@ -51,11 +62,13 @@ impl<T> CircularBuffer<T> {
     }
 
     /// Check if empty.
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.inner.lock().is_empty()
     }
 
     /// Current number of items.
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.inner.lock().len()
     }

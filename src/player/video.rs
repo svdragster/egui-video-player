@@ -12,7 +12,6 @@ const HOLD_THRESHOLD: f64 = 0.02;
 pub struct VideoFrameQueue {
     receiver: Receiver<DecodedVideoFrame>,
     buffer: VecDeque<DecodedVideoFrame>,
-    current_frame: Option<DecodedVideoFrame>,
     max_buffer_size: usize,
 }
 
@@ -21,7 +20,6 @@ impl VideoFrameQueue {
         Self {
             receiver,
             buffer: VecDeque::with_capacity(max_buffer_size),
-            current_frame: None,
             max_buffer_size,
         }
     }
@@ -40,8 +38,9 @@ impl VideoFrameQueue {
     }
 
     /// Get the frame that should be displayed for the given audio time.
-    /// Returns the frame data if a new frame should be shown.
-    pub fn get_display_frame(&mut self, audio_time: f64) -> Option<&DecodedVideoFrame> {
+    /// Returns Some only when a NEW frame is popped (avoids redundant texture uploads).
+    /// Returns owned frame to allow zero-copy ColorImage creation.
+    pub fn get_display_frame(&mut self, audio_time: f64) -> Option<DecodedVideoFrame> {
         self.receive_frames();
 
         // Drop frames that are too late
@@ -56,22 +55,17 @@ impl VideoFrameQueue {
         // Check if next frame should be shown
         if let Some(frame) = self.buffer.front() {
             if frame.pts <= audio_time + HOLD_THRESHOLD {
-                // Time to show this frame
-                self.current_frame = self.buffer.pop_front();
+                return self.buffer.pop_front();
             }
         }
 
-        self.current_frame.as_ref()
-    }
-
-    /// Get the current frame without advancing
-    pub fn current_frame(&self) -> Option<&DecodedVideoFrame> {
-        self.current_frame.as_ref()
+        None
     }
 
     /// Get the first available frame after a seek (more lenient than sync logic)
-    /// Accepts any frame at or after the seek target
-    pub fn get_first_frame_after_seek(&mut self, seek_target: f64) -> Option<&DecodedVideoFrame> {
+    /// Accepts any frame at or after the seek target.
+    /// Returns owned frame to allow zero-copy ColorImage creation.
+    pub fn get_first_frame_after_seek(&mut self, seek_target: f64) -> Option<DecodedVideoFrame> {
         self.receive_frames();
 
         // Drop frames that are before the seek target (with some tolerance)
@@ -84,23 +78,18 @@ impl VideoFrameQueue {
         }
 
         // Take the first available frame
-        if self.buffer.front().is_some() {
-            self.current_frame = self.buffer.pop_front();
-        }
-
-        self.current_frame.as_ref()
+        self.buffer.pop_front()
     }
 
     /// Clear all buffered frames (used during seek)
     pub fn clear(&mut self) {
         self.buffer.clear();
-        self.current_frame = None;
         // Drain the receiver
         while self.receiver.try_recv().is_ok() {}
     }
 
     /// Check if queue is empty (end of stream reached)
     pub fn is_empty(&self) -> bool {
-        self.buffer.is_empty() && self.current_frame.is_none() && self.receiver.is_empty()
+        self.buffer.is_empty() && self.receiver.is_empty()
     }
 }

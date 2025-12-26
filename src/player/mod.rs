@@ -5,13 +5,35 @@ mod decoder;
 mod video;
 
 use anyhow::Result;
-use crossbeam_channel::{bounded, Sender};
+use crossbeam_channel::{bounded, Receiver, Sender};
 use egui::{ColorImage, Context, TextureHandle, TextureOptions};
 use rodio::{OutputStream, OutputStreamHandle, Sink};
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
+use std::time::Duration;
+
+/// Volume level (0.0 to 1.0)
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Volume(f32);
+
+impl Volume {
+    /// Create a new volume level. Returns None if value is outside 0.0..=1.0
+    pub fn new(value: f32) -> Option<Self> {
+        if (0.0..=1.0).contains(&value) {
+            Some(Self(value))
+        } else {
+            None
+        }
+    }
+
+    /// Get the inner value
+    #[must_use]
+    pub fn get(self) -> f32 {
+        self.0
+    }
+}
 
 use audio::AudioSource;
 use circular_buffer::CircularBuffer;
@@ -61,6 +83,9 @@ pub struct VideoPlayer {
     // Video
     frame_queue: VideoFrameQueue,
     texture: Option<TextureHandle>,
+
+    // Error reporting
+    error_receiver: Receiver<String>,
 }
 
 impl VideoPlayer {
@@ -92,6 +117,9 @@ impl VideoPlayer {
         // Create command channel
         let (command_sender, command_receiver) = bounded(16);
 
+        // Create error channel
+        let (error_sender, error_receiver) = bounded(4);
+
         // Start decoder thread
         let stop_flag = Arc::new(AtomicBool::new(false));
         let decoder_handle = start_decoder_thread(
@@ -101,6 +129,7 @@ impl VideoPlayer {
             command_receiver,
             clock.clone(),
             stop_flag.clone(),
+            error_sender,
         )?;
 
         // Create initial texture
@@ -127,11 +156,12 @@ impl VideoPlayer {
             clock,
             frame_queue,
             texture: Some(texture),
+            error_receiver,
         };
 
         // Resume decoder temporarily to get first frame, then seek to show it
         let _ = player.command_sender.send(DecoderCommand::Resume);
-        player.seek(0.0);
+        player.seek(Duration::ZERO);
 
         Ok(player)
     }
@@ -159,33 +189,36 @@ impl VideoPlayer {
         self.state = PlayerState::Stopped;
         self.sink.pause();
         let _ = self.command_sender.send(DecoderCommand::Pause);
-        self.seek(0.0);
+        self.seek(Duration::ZERO);
     }
 
-    /// Seek to position in seconds
-    pub fn seek(&mut self, position: f64) {
-        let position = position.clamp(0.0, self.duration);
+    /// Seek to position
+    pub fn seek(&mut self, position: Duration) {
+        let position_secs = position.as_secs_f64().clamp(0.0, self.duration);
         self.seeking = true;
-        self.seek_target = position;
+        self.seek_target = position_secs;
         self.sink.pause(); // Pause audio during seek to stop clock advancement
         self.frame_queue.clear();
-        self.clock.set_position(position);
-        let _ = self.command_sender.send(DecoderCommand::Seek(position));
+        self.clock.set_position(position_secs);
+        let _ = self.command_sender.send(DecoderCommand::Seek(position_secs));
     }
 
     /// Check if currently seeking
+    #[must_use]
     pub fn is_seeking(&self) -> bool {
         self.seeking
     }
 
-    /// Set volume (0.0 to 1.0)
-    pub fn set_volume(&mut self, volume: f32) {
-        self.sink.set_volume(volume.clamp(0.0, 1.0));
+    /// Set volume
+    pub fn set_volume(&mut self, volume: Volume) {
+        self.sink.set_volume(volume.get());
     }
 
     /// Get current volume
-    pub fn volume(&self) -> f32 {
-        self.sink.volume()
+    #[must_use]
+    pub fn volume(&self) -> Volume {
+        // Safe: rodio volume is always 0.0..=1.0
+        Volume(self.sink.volume())
     }
 
     /// Toggle display mode
@@ -197,6 +230,7 @@ impl VideoPlayer {
     }
 
     /// Get current display mode
+    #[must_use]
     pub fn display_mode(&self) -> DisplayMode {
         self.display_mode
     }
@@ -208,10 +242,11 @@ impl VideoPlayer {
             if let Some(frame) = self.frame_queue.get_first_frame_after_seek(self.seek_target) {
                 // Frame arrived - seek complete
                 if let Some(ref mut texture) = self.texture {
-                    let image = ColorImage::from_rgba_unmultiplied(
-                        [frame.width as usize, frame.height as usize],
-                        &frame.rgba,
-                    );
+                    // Zero-copy: move pixels directly into ColorImage
+                    let image = ColorImage {
+                        size: [frame.width as usize, frame.height as usize],
+                        pixels: frame.pixels,
+                    };
                     texture.set(image, TextureOptions::LINEAR);
                 }
                 // Update clock to match the actual frame we got
@@ -233,12 +268,12 @@ impl VideoPlayer {
         let audio_time = self.clock.position();
 
         if let Some(frame) = self.frame_queue.get_display_frame(audio_time) {
-            // Update texture with new frame
+            // Update texture with new frame (zero-copy)
             if let Some(ref mut texture) = self.texture {
-                let image = ColorImage::from_rgba_unmultiplied(
-                    [frame.width as usize, frame.height as usize],
-                    &frame.rgba,
-                );
+                let image = ColorImage {
+                    size: [frame.width as usize, frame.height as usize],
+                    pixels: frame.pixels,
+                };
                 texture.set(image, TextureOptions::LINEAR);
             }
         }
@@ -253,37 +288,50 @@ impl VideoPlayer {
     }
 
     /// Get texture handle for rendering
+    #[must_use]
     pub fn texture(&self) -> Option<&TextureHandle> {
         self.texture.as_ref()
     }
 
     /// Get video dimensions
+    #[must_use]
     pub fn video_size(&self) -> (u32, u32) {
         (self.width, self.height)
     }
 
-    /// Get video duration in seconds
-    pub fn duration(&self) -> f64 {
-        self.duration
+    /// Get video duration
+    #[must_use]
+    pub fn duration(&self) -> Duration {
+        Duration::from_secs_f64(self.duration)
     }
 
-    /// Get current playback position in seconds
-    pub fn position(&self) -> f64 {
-        if self.seeking {
+    /// Get current playback position
+    #[must_use]
+    pub fn position(&self) -> Duration {
+        let secs = if self.seeking {
             self.seek_target // Show seek target while seeking
         } else {
             self.clock.position()
-        }
+        };
+        Duration::from_secs_f64(secs)
     }
 
     /// Check if currently playing
+    #[must_use]
     pub fn is_playing(&self) -> bool {
         self.state == PlayerState::Playing
     }
 
     /// Get player state
+    #[must_use]
     pub fn state(&self) -> PlayerState {
         self.state
+    }
+
+    /// Poll for decoder errors (non-blocking)
+    #[must_use]
+    pub fn error(&self) -> Option<String> {
+        self.error_receiver.try_recv().ok()
     }
 }
 

@@ -55,6 +55,7 @@ impl AudioClock {
         }
     }
 
+    #[allow(dead_code)]
     pub fn is_paused(&self) -> bool {
         self.paused.load(Ordering::Relaxed)
     }

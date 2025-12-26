@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Context, Result};
 use crossbeam_channel::{Receiver, Sender, TryRecvError, TrySendError};
+use egui::Color32;
 use ffmpeg_next::format::Pixel;
 use ffmpeg_next::frame::{Audio as AudioFrame, Video as VideoFrame};
 use ffmpeg_next::media::Type;
@@ -16,9 +17,13 @@ use std::thread::{self, JoinHandle};
 use super::circular_buffer::CircularBuffer;
 use super::clock::AudioClock;
 
+// Compile-time verification that Color32 can be safely transmuted from [u8; 4]
+const _: () = assert!(std::mem::size_of::<Color32>() == 4);
+const _: () = assert!(std::mem::align_of::<Color32>() == 1);
+
 /// A decoded video frame ready for display
 pub struct DecodedVideoFrame {
-    pub rgba: Vec<u8>,
+    pub pixels: Vec<Color32>,
     pub width: u32,
     pub height: u32,
     pub pts: f64, // seconds
@@ -88,6 +93,7 @@ pub fn start_decoder_thread(
     command_receiver: Receiver<DecoderCommand>,
     clock: AudioClock,
     stop_flag: Arc<AtomicBool>,
+    error_sender: Sender<String>,
 ) -> Result<JoinHandle<()>> {
     let path = path.to_path_buf();
 
@@ -100,7 +106,7 @@ pub fn start_decoder_thread(
             clock,
             stop_flag,
         ) {
-            eprintln!("Decoder error: {}", e);
+            let _ = error_sender.send(format!("Decoder error: {}", e));
         }
     });
 
@@ -247,8 +253,19 @@ fn decode_loop(
                         let pts = video_frame.pts().unwrap_or(0);
                         let pts_seconds = pts as f64 * f64::from(video_time_base);
 
+                        // Convert RGBA bytes to Color32 via transmute (zero-copy reinterpret)
+                        // Safe because: Color32 is repr(C) with same layout as [u8; 4] in RGBA order
+                        let pixels: Vec<Color32> = unsafe {
+                            let mut rgba = rgba_frame.data(0).to_vec();
+                            let len = rgba.len() / 4;
+                            let cap = rgba.capacity() / 4;
+                            let ptr = rgba.as_mut_ptr() as *mut Color32;
+                            std::mem::forget(rgba);
+                            Vec::from_raw_parts(ptr, len, cap)
+                        };
+
                         let mut frame = DecodedVideoFrame {
-                            rgba: rgba_frame.data(0).to_vec(),
+                            pixels,
                             width: rgba_frame.width(),
                             height: rgba_frame.height(),
                             pts: pts_seconds,
@@ -337,8 +354,17 @@ fn decode_loop(
         let pts = video_frame.pts().unwrap_or(0);
         let pts_seconds = pts as f64 * f64::from(video_time_base);
 
+        let pixels: Vec<Color32> = unsafe {
+            let mut rgba = rgba_frame.data(0).to_vec();
+            let len = rgba.len() / 4;
+            let cap = rgba.capacity() / 4;
+            let ptr = rgba.as_mut_ptr() as *mut Color32;
+            std::mem::forget(rgba);
+            Vec::from_raw_parts(ptr, len, cap)
+        };
+
         let frame = DecodedVideoFrame {
-            rgba: rgba_frame.data(0).to_vec(),
+            pixels,
             width: rgba_frame.width(),
             height: rgba_frame.height(),
             pts: pts_seconds,
