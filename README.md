@@ -1,6 +1,8 @@
-# egui_video
+# egui Video Player
 
 Video player library for egui using FFmpeg.
+
+![Screenshot_20251226_193011](https://github.com/user-attachments/assets/d7b0fa12-bfd8-46d0-b99b-c13a4941062d)
 
 ## Features
 
