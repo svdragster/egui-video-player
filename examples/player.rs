@@ -1,15 +1,14 @@
-use crate::player::{DisplayMode, VideoPlayer};
-use crate::ui::controls::PlayerControls;
 use egui::{CentralPanel, Color32, ScrollArea, TopBottomPanel, Vec2};
+use egui_video::{DisplayMode, PlayerControls, VideoPlayer};
 use std::path::PathBuf;
 
-pub struct VideoPlayerApp {
+struct VideoPlayerApp {
     player: Option<VideoPlayer>,
     error_message: Option<String>,
 }
 
 impl VideoPlayerApp {
-    pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
+    fn new(_cc: &eframe::CreationContext<'_>) -> Self {
         Self {
             player: None,
             error_message: None,
@@ -155,4 +154,21 @@ impl eframe::App for VideoPlayerApp {
             }
         }
     }
+}
+
+fn main() -> eframe::Result<()> {
+    ffmpeg_next::init().expect("Failed to initialize FFmpeg");
+
+    let options = eframe::NativeOptions {
+        viewport: egui::ViewportBuilder::default()
+            .with_inner_size([1280.0, 720.0])
+            .with_min_inner_size([640.0, 480.0]),
+        ..Default::default()
+    };
+
+    eframe::run_native(
+        "Video Player",
+        options,
+        Box::new(|cc| Ok(Box::new(VideoPlayerApp::new(cc)))),
+    )
 }

@@ -1,6 +1,6 @@
-# egui-video-player
+# egui_video
 
-Cross-platform video player using FFmpeg and egui.
+Video player library for egui using FFmpeg.
 
 ## Features
 
@@ -8,6 +8,32 @@ Cross-platform video player using FFmpeg and egui.
 - Seeking support
 - Volume control
 - Fit-to-window and native size display modes
+
+## Usage
+
+```rust
+use egui_video::{VideoPlayer, PlayerControls};
+
+// Open a video
+let player = VideoPlayer::open(&path, ctx.clone())?;
+
+// In your update loop
+player.update(ctx);
+
+// Show controls
+PlayerControls::show(ui, &mut player);
+
+// Render the video texture
+if let Some(texture) = player.texture() {
+    ui.image((texture.id(), size));
+}
+```
+
+## Example
+
+```sh
+cargo run --release --example player
+```
 
 ## Requirements
 
@@ -39,11 +65,3 @@ See [ffmpeg-next documentation](https://github.com/zmwangx/rust-ffmpeg/wiki/Note
 ```sh
 cargo build --release
 ```
-
-## Usage
-
-```sh
-cargo run --release
-```
-
-Use "Open File" to select a video file.

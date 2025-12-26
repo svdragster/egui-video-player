@@ -1085,20 +1085,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "egui-video-player"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "crossbeam-channel",
- "eframe",
- "egui",
- "ffmpeg-next",
- "parking_lot",
- "rfd",
- "rodio",
-]
-
-[[package]]
 name = "egui-wgpu"
 version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1150,6 +1136,20 @@ dependencies = [
  "wasm-bindgen",
  "web-sys",
  "winit",
+]
+
+[[package]]
+name = "egui_video"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "crossbeam-channel",
+ "eframe",
+ "egui",
+ "ffmpeg-next",
+ "parking_lot",
+ "rfd",
+ "rodio",
 ]
 
 [[package]]

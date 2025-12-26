@@ -1,9 +1,17 @@
 [package]
-name = "egui-video-player"
+name = "egui_video"
 version = "0.1.0"
 edition = "2021"
-description = "Cross-platform video player using FFmpeg and egui"
+description = "Video player library using FFmpeg and egui"
 license = "MIT"
+
+[lib]
+name = "egui_video"
+path = "src/lib.rs"
+
+[[example]]
+name = "player"
+path = "examples/player.rs"
 
 [dependencies]
 eframe = "0.29"
